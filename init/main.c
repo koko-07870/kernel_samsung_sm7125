@@ -88,6 +88,7 @@
 #include <linux/io.h>
 #include <linux/cache.h>
 #include <linux/rodata_test.h>
+#include <linux/jump_label.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -1308,6 +1309,7 @@ static int __ref kernel_init(void *unused)
 	async_synchronize_full();
 #ifndef CONFIG_DEFERRED_INITCALLS
 	ftrace_free_init_mem();
+	jump_label_invalidate_init();
 	free_initmem();
 #endif
 	mark_readonly();

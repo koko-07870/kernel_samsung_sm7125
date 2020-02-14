@@ -5878,7 +5878,8 @@ cpu_is_in_target_set(struct task_struct *p, int cpu)
 {
 	struct root_domain *rd = cpu_rq(cpu)->rd;
 	int first_cpu, next_usable_cpu;
-	if (schedtune_task_boost(p)) {
+
+	if (schedtune_prefer_high_cap(p)) {
 		first_cpu = rd->mid_cap_orig_cpu != -1 ? rd->mid_cap_orig_cpu :
 			    rd->max_cap_orig_cpu;
 	} else {
@@ -7530,7 +7531,7 @@ enum fastpaths {
 
 static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 				   bool boosted, bool prefer_idle,
-				   struct find_best_target_env *fbt_env)
+				   struct find_best_target_env *fbt_env,bool prefer_high_cap)
 {
 	unsigned long min_util = boosted_task_util(p);
 	unsigned long target_capacity = ULONG_MAX;
@@ -7564,15 +7565,15 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 	 * energy efficient CPU candidate, thus requiring to minimise
 	 * target_capacity. For these cases target_capacity is already
 	 * initialized to ULONG_MAX.
-	 * However, for prefer_idle and boosted tasks we look for a high
+	 * However, for prefer_idle and prefer_high_cap tasks we look for a high
 	 * performance CPU, thus requiring to maximise target_capacity. In this
 	 * case we initialise target_capacity to 0.
 	 */
-	if (prefer_idle && boosted)
+	if (prefer_idle && prefer_high_cap)
 		target_capacity = 0;
 
 	/* Find start CPU based on boost value */
-	cpu = start_cpu(p, boosted, fbt_env->rtg_target);
+	cpu = start_cpu(p, prefer_high_cap, fbt_env->rtg_target);
 	if (cpu < 0)
 		return -1;
 
@@ -7718,20 +7719,24 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 			 * tasks.
 			 */
 			if (prefer_idle) {
-
 				/*
 				 * Case A.1: IDLE CPU
 				 * Return the best IDLE CPU we find:
-				 * - for boosted tasks: the CPU with the highest
-				 * performance (i.e. biggest capacity_orig)
-				 * - for !boosted tasks: the most energy
+				 * - for prefer_high_cap tasks: if the task fits in mid
+				 * cluster, prefer the first mid cluster cpu
+				 * due to cpuset design, then other mid cluster
+				 * cpus. Otherwise, choose max cluster cpu.
+				 * - for !prefer_high_cap tasks: the most energy
 				 * efficient CPU (i.e. smallest capacity_orig)
 				 */
+				if (prefer_high_cap && mid_cap_orig_cpu != -1 &&
+				    best_idle_cpu == mid_cap_orig_cpu)
+					break;
 				if (idle_cpu(i)) {
-					if (boosted &&
+					if (prefer_high_cap &&
 					    capacity_orig < target_capacity)
 						continue;
-					if (!boosted &&
+					if (!prefer_high_cap &&
 					    capacity_orig > target_capacity)
 						continue;
 					if (capacity_orig == target_capacity &&
@@ -7900,7 +7905,7 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 		 * next cluster if they are higher in capacity. If we are
 		 * not in any kind of boost, we break.
 		 */
-		if (!prefer_idle && !boosted &&
+		if (!prefer_idle && !prefer_high_cap &&
 			(target_cpu != -1 || best_idle_cpu != -1) &&
 			(fbt_env->placement_boost == SCHED_BOOST_NONE ||
 			sched_boost() != FULL_THROTTLE_BOOST ||
@@ -7910,15 +7915,22 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 		/*
 		 * if we are in prefer_idle and have found an idle cpu,
-		 * break from searching more groups based on the stune.boost and
-		 * group cpu capacity. For !prefer_idle && boosted case, don't
+		 * break from searching more groups based on the stune.prefer_high_cap and
+		 * group cpu capacity. For !prefer_idle && prefer_high_cap case, don't
 		 * iterate lower capacity CPUs unless the task can't be
 		 * accommodated in the higher capacity CPUs.
 		 */
 		if ((prefer_idle && best_idle_cpu != -1) ||
-		    (boosted && (best_idle_cpu != -1 || target_cpu != -1))) {
-			if (boosted) {
-				if (!next_group_higher_cap)
+		    (prefer_high_cap &&
+		     (best_idle_cpu != -1 || target_cpu != -1))) {
+			if (prefer_high_cap) {
+				/*
+				 * For prefer_high_cap task, stop searching when an idle
+				 * cpu is found in mid cluster.
+				 */
+				if ((mid_cap_orig_cpu != -1 &&
+					best_idle_cpu >= mid_cap_orig_cpu) ||
+					!next_group_higher_cap)
 					break;
 			} else {
 				if (next_group_higher_cap)
@@ -7928,9 +7940,9 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 	} while (sg = sg->next, sg != sd->groups);
 
-	if (best_idle_cpu != -1 && !is_packing_eligible(p, target_cpu, fbt_env,
-					active_cpus_count, best_idle_cstate,
-					boosted)) {
+	if (best_idle_cpu != -1 &&
+	    !is_packing_eligible(p, target_cpu, fbt_env, active_cpus_count,
+				 best_idle_cstate, prefer_high_cap)) {
 		target_cpu = best_idle_cpu;
 		best_idle_cpu = -1;
 	}
@@ -7955,12 +7967,10 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 	 *   a) ACTIVE CPU: target_cpu
 	 *   b) IDLE CPU: best_idle_cpu
 	 */
-
 	if (prefer_idle && (best_idle_cpu != -1)) {
 		trace_sched_find_best_target(p, prefer_idle, min_util, cpu,
 					     best_idle_cpu, best_active_cpu,
 					     -1, best_idle_cpu, -1);
-
 		return best_idle_cpu;
 	}
 
@@ -8248,7 +8258,7 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 	u64 start_t = 0;
 	int next_cpu = -1, backup_cpu = -1;
 	int boosted = (schedtune_task_boost(p) > 0 || per_task_boost(p) > 0);
-
+	bool prefer_high_cap = schedtune_prefer_high_cap(p);
 	fbt_env.fastpath = 0;
 
 	if (trace_sched_task_util_enabled())
@@ -8329,7 +8339,7 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 
 		/* Find a cpu with sufficient capacity */
 		target_cpu = find_best_target(p, &eenv->cpu[EAS_CPU_BKP].cpu_id,
-					      boosted, prefer_idle, &fbt_env);
+					      boosted, prefer_idle, &fbt_env, prefer_high_cap);
 		if (target_cpu < 0)
 			goto out;
 
@@ -8342,9 +8352,11 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 		    p->state == TASK_WAKING)
 			delta = task_util(p);
 #endif
-		if (task_placement_boost_enabled(p) || need_idle || boosted ||
-		    (rtg_target && (!cpumask_test_cpu(prev_cpu, rtg_target) ||
-		    cpumask_test_cpu(target_cpu, rtg_target))) ||
+		if (task_placement_boost_enabled(p) || need_idle ||
+		    prefer_high_cap ||
+		    (rtg_target &&
+		     (!cpumask_test_cpu(prev_cpu, rtg_target) ||
+		      cpumask_test_cpu(target_cpu, rtg_target))) ||
 		    __cpu_overutilized(prev_cpu, delta) ||
 		    !task_fits_max(p, prev_cpu) || cpu_isolated(prev_cpu))
 			goto out;

@@ -365,6 +365,9 @@ int dsi_panel_parse_esd_reg_read_configs(struct dsi_panel *panel);
 
 void dsi_panel_ext_bridge_put(struct dsi_panel *panel);
 
+void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
+                struct dsi_mode_info *timing);
+
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable);
 int dsi_panel_power_on(struct dsi_panel *panel);

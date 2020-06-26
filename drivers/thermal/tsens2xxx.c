@@ -279,6 +279,13 @@ static int tsens2xxx_get_temp(struct tsens_sensor *sensor, int *temp)
 			/* Notify thermal fwk */
 			list_for_each_entry(tmdev_itr,
 						&tsens_device_list, list) {
+				rc = __tsens2xxx_hw_init(tmdev_itr);
+				if (rc) {
+					pr_err(
+					"%s: Failed to re-initialize TSENS controller\n",
+						__func__);
+					BUG();
+				}
 				queue_work(tmdev_itr->tsens_reinit_work,
 					&tmdev_itr->therm_fwk_notify);
 			}
@@ -728,9 +735,11 @@ static int tsens2xxx_hw_sensor_en(struct tsens_device *tmdev,
 static int tsens2xxx_hw_init(struct tsens_device *tmdev)
 {
 	int rc = 0;
+
 	rc = __tsens2xxx_hw_init(tmdev);
 	if (rc)
 		return rc;
+
 	spin_lock_init(&tmdev->tsens_crit_lock);
 	spin_lock_init(&tmdev->tsens_upp_low_lock);
 

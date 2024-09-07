@@ -1390,28 +1390,33 @@ static int reverse_path_check(void)
 
 static int ep_create_wakeup_source(struct epitem *epi)
 {
+        struct name_snapshot n;
+        struct wakeup_source *ws;
+        char task_comm_buf[TASK_COMM_LEN];
+        char buf[64];
 
-	struct name_snapshot n;
-	struct wakeup_source *ws;
+        get_task_comm(task_comm_buf, current);
 
-	if (!epi->ep->ws) {
-		epi->ep->ws = wakeup_source_register(NULL, "eventpoll");
-		if (!epi->ep->ws)
-			return -ENOMEM;
-	}
+        if (!epi->ep->ws) {
+                snprintf(buf, sizeof(buf), "epoll_%.*s_epollfd",
+                         (int)sizeof(task_comm_buf), task_comm_buf);
+                epi->ep->ws = wakeup_source_register(NULL, buf);
+                if (!epi->ep->ws)
+                        return -ENOMEM;
+        }
 
+        take_dentry_name_snapshot(&n, epi->ffd.file->f_path.dentry);
+        snprintf(buf, sizeof(buf), "epoll_%.*s_file:%s",
+                 (int)sizeof(task_comm_buf), task_comm_buf, n.name);
+        ws = wakeup_source_register(NULL, buf);
+        release_dentry_name_snapshot(&n);
 
-	take_dentry_name_snapshot(&n, epi->ffd.file->f_path.dentry);
-	ws = wakeup_source_register(n.name);
-	release_dentry_name_snapshot(&n);
+        if (!ws)
+                return -ENOMEM;
+        rcu_assign_pointer(epi->ws, ws);
 
-	if (!ws)
-		return -ENOMEM;
-	rcu_assign_pointer(epi->ws, ws);
-
-	return 0;
+        return 0;
 }
-
 /* rare code path, only used when EPOLL_CTL_MOD removes a wakeup source */
 static noinline void ep_destroy_wakeup_source(struct epitem *epi)
 {

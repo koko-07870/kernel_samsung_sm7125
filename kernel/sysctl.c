@@ -1940,6 +1940,7 @@ static struct ctl_table vm_table[] = {
 		.maxlen		= sizeof(sysctl_swap_ratio_enable),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
+	},
 #endif
 #ifdef CONFIG_USERFAULTFD
 	{

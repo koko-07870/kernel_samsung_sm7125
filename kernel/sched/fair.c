@@ -5370,6 +5370,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 	int task_new = !(flags & ENQUEUE_WAKEUP);
+	bool prefer_idle = sched_feat(EAS_PREFER_IDLE) ?
 
 #ifdef CONFIG_SCHED_TUNE
 				(schedtune_prefer_idle(p) > 0) : 0;
@@ -9507,6 +9508,9 @@ static void detach_task(struct task_struct *p, struct lb_env *env)
 	set_task_cpu(p, env->dst_cpu);
 	double_unlock_balance(env->src_rq, env->dst_rq);
 	lockdep_on();
+#else
+	set_task_cpu(p, env->dst_cpu);
+#endif
 }
 
 /*

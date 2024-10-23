@@ -81,8 +81,8 @@ EXPORT_SYMBOL(msm_drm_unregister_client);
  * @v: notifier data, inculde display id and display blank
  *     event(unblank or power down).
  */
-static int msm_drm_notifier_call_chain(unsigned long val, void *v)
 static bool notifier_enabled __read_mostly = true;
+static int msm_drm_notifier_call_chain(unsigned long val, void *v)
 {
 	if (unlikely(!notifier_enabled))
 		return 0;

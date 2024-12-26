@@ -357,10 +357,6 @@ static ssize_t f2fs_sbi_show(struct f2fs_attr *a,
 	} else if (!strcmp(a->attr.name, "sec_io_stat")) {
 		u64 kbytes_written = 0;
 
-		if (sbi->sb->s_bdev->bd_part)
-			kbytes_written = BD_PART_WRITTEN(sbi) -
-					 sbi->sec_stat.kwritten_byte;
-
 		return snprintf(buf, PAGE_SIZE, "\"%s\":\"%llu\",\"%s\":\"%llu\","
 		"\"%s\":\"%llu\",\"%s\":\"%llu\",\"%s\":\"%llu\",\"%s\":\"%llu\","
 		"\"%s\":\"%llu\",\"%s\":\"%llu\",\"%s\":\"%llu\",\"%s\":\"%llu\","
@@ -572,8 +568,6 @@ out:
 		sbi->sec_stat.max_inmem_pages = 0;
 		sbi->sec_stat.drop_inmem_all = 0;
 		sbi->sec_stat.drop_inmem_files = 0;
-		if (sbi->sb->s_bdev->bd_part)
-			sbi->sec_stat.kwritten_byte = BD_PART_WRITTEN(sbi);
 		sbi->sec_stat.fs_por_error = 0;
 		sbi->sec_stat.fs_error = 0;
 		sbi->sec_stat.max_undiscard_blks = 0;

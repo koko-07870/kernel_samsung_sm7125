@@ -271,6 +271,7 @@ static void f2fs_post_read_work(struct work_struct *work)
 
 static void f2fs_read_end_io(struct bio *bio)
 {
+	struct page *first_page = bio->bi_io_vec[0].bv_page;
 	struct f2fs_sb_info *sbi = F2FS_P_SB(bio->bi_io_vec->bv_page);
 	struct bio_post_read_ctx *ctx;
 	bool intask = in_task();
@@ -357,12 +358,8 @@ static void f2fs_write_end_io(struct bio *bio)
 			mapping_set_error(page->mapping, -EIO);
 			if (type == F2FS_WB_CP_DATA) {
 				f2fs_stop_checkpoint(sbi, true);
-                f2fs_bug_on_endio(sbi, 1);
             }
 		}
-
-		f2fs_bug_on_endio(sbi, page->mapping == NODE_MAPPING(sbi) &&
-					page->index != nid_of_node(page));
 
 		dec_page_count(sbi, type);
 		if (f2fs_in_warm_node_list(sbi, page))
@@ -771,14 +768,6 @@ int f2fs_submit_page_bio(struct f2fs_io_info *fio)
 	if (fio->io_wbc && !is_read_io(fio->op))
 		wbc_account_io(fio->io_wbc, page, PAGE_SIZE);
 
-	__attach_io_flag(fio);
-	/* @fs.sec -- 0531f63f3688ffb680b8c83a53641dce37f186da -- */
-	if (fio->op_flags & F2FS_REQ_DEFKEY_BYPASS && is_read_io(fio->op)) {
-		f2fs_warn(fio->sbi, "Set bio bypass to get lower block");
-		bio_set_skip_dm_default_key(bio);
-		fio->op_flags &= ~F2FS_REQ_DEFKEY_BYPASS;
-	}
-
 	inc_page_count(fio->sbi, is_read_io(fio->op) ?
 			__read_io_type(page): WB_DATA_TYPE(fio->page));
 
@@ -974,7 +963,6 @@ alloc_new:
 		f2fs_set_bio_crypt_ctx(bio, fio->page->mapping->host,
 				       fio->page->index, fio,
 				       GFP_NOIO);
-		__attach_io_flag(fio);
 		add_bio_entry(fio->sbi, bio, page, fio->temp);
 	} else {
 		if (add_ipu_page(fio, &bio, page))
@@ -1097,9 +1085,6 @@ static struct bio *f2fs_grab_read_bio(struct inode *inode, block_t blkaddr,
 
 	if (f2fs_encrypted_file(inode))
 		post_read_steps |= STEP_DECRYPT;
-
-        if (f2fs_compressed_file(inode))
-                post_read_steps |= 1 << STEP_DECOMPRESS_NOWQ;
 
 	if (f2fs_need_verity(inode, first_idx))
 		post_read_steps |= STEP_VERITY;
@@ -1343,9 +1328,6 @@ struct page *f2fs_find_data_page(struct inode *inode, pgoff_t index)
 	if (page && PageUptodate(page))
 		return page;
 	f2fs_put_page(page, 0);
-
-	if (unlikely(rwsem_is_locked(&sbi->cp_rwsem)))
-		for_write = true;
 
 	page = f2fs_get_read_data_page(inode, index, 0, for_write);
 	if (IS_ERR(page))
@@ -1770,9 +1752,6 @@ sync_out:
 		 */
 		f2fs_wait_on_block_writeback_range(inode,
 						map->m_pblk, map->m_len);
-		invalidate_mapping_pages(META_MAPPING(sbi),
-						map->m_pblk, map->m_pblk);
-	}
 
 		if (map->m_multidev_dio) {
 			block_t blk_addr = map->m_pblk;

@@ -847,9 +847,6 @@ retry:
 
 		if (gc_type == BG_GC && test_bit(secno, dirty_i->victim_secmap))
 			goto next;
-		/* W/A for FG_GC failure due to Atomic Write File */    
-		if (test_bit(secno, dirty_i->blacklist_victim_secmap))
-			goto next;
 
 		if (gc_type == FG_GC && f2fs_section_is_pinned(dirty_i, secno))
 			goto next;
@@ -1763,17 +1760,6 @@ skip:
 	return seg_freed;
 }
 
-/* For record miliseconds */
-#define	GC_TIME_RECORD_UNIT	1000000
-static void f2fs_update_gc_total_time(struct f2fs_sb_info *sbi,
-		unsigned long long start, unsigned long long end, int gc_type)
-{
-	if (!((end - start) / GC_TIME_RECORD_UNIT))
-		sbi->sec_stat.gc_ttime[gc_type]++;
-	else
-		sbi->sec_stat.gc_ttime[gc_type] += ((end - start) / GC_TIME_RECORD_UNIT);
-}
-
 int f2fs_gc(struct f2fs_sb_info *sbi, struct f2fs_gc_control *gc_control)
 {
 	int gc_type = gc_control->init_gc_type;
@@ -1796,11 +1782,6 @@ int f2fs_gc(struct f2fs_sb_info *sbi, struct f2fs_gc_control *gc_control)
 				free_segments(sbi),
 				reserved_segments(sbi),
 				prefree_segments(sbi));
-
-	gc_start_time = local_clock();
-	/* W/A for FG_GC failure due to Atomic Write File */    
-	memset(DIRTY_I(sbi)->blacklist_victim_secmap, 0,
-					f2fs_bitmap_size(MAIN_SECS(sbi)));
 
 	cpc.reason = __get_cp_reason(sbi);
 	sbi->skipped_gc_rwsem = 0;
@@ -1894,7 +1875,6 @@ stop:
 	if (gc_type == FG_GC)
 		f2fs_unpin_all_sections(sbi, true);
 
-	gc_end_time = local_clock();
 	trace_f2fs_gc_end(sbi->sb, ret, total_freed, sec_freed,
 				get_pages(sbi, F2FS_DIRTY_NODES),
 				get_pages(sbi, F2FS_DIRTY_DENTS),
@@ -1904,8 +1884,6 @@ stop:
 				reserved_segments(sbi),
 				prefree_segments(sbi));
 
-	sbi->sec_stat.gc_count[gc_type]++;
-	f2fs_update_gc_total_time(sbi, gc_start_time, gc_end_time, gc_type);
 	f2fs_up_write(&sbi->gc_lock);
 
 	put_gc_inode(&gc_list);

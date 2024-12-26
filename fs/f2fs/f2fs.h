@@ -748,6 +748,7 @@ enum {
 	FI_UPDATE_WRITE,	/* inode has in-place-update data */
 	FI_NEED_IPU,		/* used for ipu per file */
 	FI_ATOMIC_FILE,		/* indicate atomic file */
+	FI_ATOMIC_COMMIT,	/* indicate the state of atomical committing */
 	FI_FIRST_BLOCK_WRITTEN,	/* indicate #0 data block was written */
 	FI_DROP_CACHE,		/* drop dirty page cache */
 	FI_DATA_EXIST,		/* indicate data exists */
@@ -980,13 +981,6 @@ enum nid_state {
 	FREE_NID,		/* newly added to free nid list */
 	PREALLOC_NID,		/* it is preallocated */
 	MAX_NID_STATE,
-};
- 
-enum nat_state {
-	TOTAL_NAT,
-	DIRTY_NAT,
-	RECLAIMABLE_NAT,
-	MAX_NAT_STATE,
 };
 
 enum nat_state {
@@ -3406,6 +3400,11 @@ static inline bool f2fs_is_pinned_file(struct inode *inode)
 static inline bool f2fs_is_atomic_file(struct inode *inode)
 {
 	return is_inode_flag_set(inode, FI_ATOMIC_FILE);
+}
+
+static inline bool f2fs_is_commit_atomic_write(struct inode *inode)
+{
+	return is_inode_flag_set(inode, FI_ATOMIC_COMMIT);
 }
 
 static inline bool f2fs_is_cow_file(struct inode *inode)

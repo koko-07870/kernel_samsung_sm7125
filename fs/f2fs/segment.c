@@ -192,35 +192,6 @@ bool f2fs_need_SSR(struct f2fs_sb_info *sbi)
 			SM_I(sbi)->min_ssr_sections + reserved_sections(sbi));
 }
 
-void f2fs_register_inmem_page(struct inode *inode, struct page *page)
-{
-	struct inmem_pages *new;
-
-	f2fs_trace_pid(page);
-
-	f2fs_set_page_private(page, (unsigned long)ATOMIC_WRITTEN_PAGE);
-
-	new = f2fs_kmem_cache_alloc(inmem_entry_slab, GFP_NOFS);
-
-	/* add atomic page indices to the list */
-	new->page = page;
-	INIT_LIST_HEAD(&new->list);
-
-	/* increase reference count with clean state */
-	get_page(page);
-	mutex_lock(&F2FS_I(inode)->inmem_lock);
-	list_add_tail(&new->list, &F2FS_I(inode)->inmem_pages);
-	inc_page_count(F2FS_I_SB(inode), F2FS_INMEM_PAGES);
-	if (F2FS_I_SB(inode)->sec_stat.max_inmem_pages < get_pages(F2FS_I_SB(inode), F2FS_INMEM_PAGES))
-		F2FS_I_SB(inode)->sec_stat.max_inmem_pages = get_pages(F2FS_I_SB(inode), F2FS_INMEM_PAGES);
-	mutex_unlock(&F2FS_I(inode)->inmem_lock);
-
-	trace_f2fs_register_inmem_page(page, INMEM);
-}
-
-static int __revoke_inmem_pages(struct inode *inode,
-				struct list_head *head, bool drop, bool recover,
-				bool trylock)
 void f2fs_abort_atomic_write(struct inode *inode, bool clean)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
@@ -307,47 +278,6 @@ static void __complete_revoke_list(struct inode *inode, struct list_head *head,
 	}
 }
 
-void f2fs_drop_inmem_pages_all(struct f2fs_sb_info *sbi, bool gc_failure)
-{
-	struct list_head *head = &sbi->inode_list[ATOMIC_FILE];
-	struct inode *inode;
-	struct f2fs_inode_info *fi;
-	unsigned int count = sbi->atomic_files;
-	unsigned int looped = 0;
-	sbi->sec_stat.drop_inmem_all++;
-next:
-	spin_lock(&sbi->inode_lock[ATOMIC_FILE]);
-	if (list_empty(head)) {
-		spin_unlock(&sbi->inode_lock[ATOMIC_FILE]);
-		return;
-	}
-	fi = list_first_entry(head, struct f2fs_inode_info, inmem_ilist);
-	inode = igrab(&fi->vfs_inode);
-	if (inode)
-		list_move_tail(&fi->inmem_ilist, head);
-	sbi->sec_stat.drop_inmem_files++;
-	spin_unlock(&sbi->inode_lock[ATOMIC_FILE]);
-
-	if (inode) {
-		if (gc_failure) {
-			if (!fi->i_gc_failures[GC_FAILURE_ATOMIC])
-				goto skip;
-		}
-		set_inode_flag(inode, FI_ATOMIC_REVOKE_REQUEST);
-		f2fs_drop_inmem_pages(inode);
-skip:
-		iput(inode);
-	}
-	congestion_wait(BLK_RW_ASYNC, DEFAULT_IO_TIMEOUT);
-	cond_resched();
-	if (gc_failure) {
-		if (++looped >= count)
-			return;
-	}
-	goto next;
-}
-
-void f2fs_drop_inmem_pages(struct inode *inode)
 static int __f2fs_commit_atomic_write(struct inode *inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
@@ -4915,8 +4845,6 @@ static void destroy_victim_secmap(struct f2fs_sb_info *sbi)
 	kvfree(dirty_i->pinned_secmap);
 	kvfree(dirty_i->victim_secmap);
 
-	/* W/A for FG_GC failure due to Atomic Write File */    
-	kvfree(dirty_i->blacklist_victim_secmap);
 }
 
 static void destroy_dirty_segmap(struct f2fs_sb_info *sbi)

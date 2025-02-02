@@ -50,6 +50,8 @@ make -j$(nproc --all) O=out \
                       LD=ld.lld \
                       CONFIG_NO_ERROR_ON_MISMATCH=y
 
+tools/mkdtimg create out/arch/arm64/boot/dtbo.img --page_size=4096 $(find out/arch -name "*.dtbo")
+
 zimage=out/arch/arm64/boot/Image.gz
 if ! [ -a $zimage ];
 then
@@ -69,3 +71,4 @@ rm -rf AnyKernel3
 echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s) !"
 echo "Zip: $ZIPNAME"
 echo
+
